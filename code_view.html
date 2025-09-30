@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>View Code</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        background: Canvas;
+        color: CanvasText;
+      }
+      header, footer {
+        padding: 12px 16px;
+        border-bottom: 1px solid color-mix(in oklab, CanvasText 20%, transparent);
+      }
+      footer { border-top: 1px solid color-mix(in oklab, CanvasText 20%, transparent); border-bottom: none; margin-top: auto; }
+      .wrap { padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .grow { flex: 1 1 auto; }
+      textarea {
+        width: 100%;
+        height: calc(100vh - 140px);
+        box-sizing: border-box;
+        resize: vertical;
+        padding: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        border: 1px solid color-mix(in oklab, CanvasText 20%, transparent);
+        border-radius: 8px;
+        background: color-mix(in oklab, Canvas 96%, CanvasText 4%);
+        color: CanvasText;
+      }
+      button, a.button {
+        appearance: none;
+        border: 1px solid color-mix(in oklab, CanvasText 25%, transparent);
+        background: color-mix(in oklab, Canvas 92%, CanvasText 8%);
+        color: CanvasText;
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      button:hover, a.button:hover { background: color-mix(in oklab, Canvas 88%, CanvasText 12%); }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    </style>
+  </head>
+  <body>
+    <header class="wrap">
+      <div class="grow"><strong>Your Code (read‑only)</strong></div>
+      <select id="codeSelect" title="Choose code">
+        <option value="inv">Inventory Management</option>
+        <option value="emp">Employee Management</option>
+      </select>
+      <button id="copyBtn" type="button" title="Copy to clipboard">Copy</button>
+      <button id="downloadBtn" type="button" title="Download as .py">Download .py</button>
+    </header>
+
+    <main class="wrap" style="padding-top: 0;">
+      <textarea id="code" readonly>
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+
+# ---------- DB ----------
+def db_init():
+    with sqlite3.connect("inv.db") as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS inv(
+                        id TEXT PRIMARY KEY, 
+                        name TEXT, 
+                        cat TEXT, 
+                        price REAL, 
+                        stock INT)""")
+
+def db(q, p=(), fetch=False):
+    with sqlite3.connect("inv.db") as con:
+        cur = con.execute(q, p)
+        return cur.fetchall() if fetch else None
+
+# ---------- App ----------
+class IMS:
+    def __init__(self, r):
+        self.r=r; r.title("Inventory Management System"); db_init()
+        self.id,self.name,self.cat,self.price,self.stock,self.search,self.filter=[tk.StringVar() for _ in range(7)]
+
+        # Info
+        f=ttk.LabelFrame(r,text="Product Info"); f.pack(fill="x",padx=8,pady=5)
+        for i,(t,v,w) in enumerate([("ID",self.id,12),("Name",self.name,20),
+            ("Category",self.cat,12),("Price",self.price,10),("Stock",self.stock,10)]):
+            tk.Label(f,text=t+":").grid(row=i//2,column=(i%2)*2,sticky="e",padx=5,pady=3)
+            tk.Entry(f,textvariable=v,width=w).grid(row=i//2,column=(i%2)*2+1,sticky="w",padx=5,pady=3)
+
+        # Buttons
+        b=tk.Frame(r); b.pack(pady=4)
+        for t,c in [("Add Product",self.add),("Update Product",self.update),
+                    ("Delete Product",self.delete),("Update Stock",self.upd_stock),("Clear Fields",self.clear)]:
+            tk.Button(b,text=t,width=12,command=c).pack(side="left",padx=4)
+
+        # Search & Filter
+        s=ttk.LabelFrame(r,text="Search & Filter"); s.pack(fill="x",padx=8,pady=5)
+        tk.Entry(s,textvariable=self.search,width=25).grid(row=0,column=0,padx=5,pady=5)
+        tk.Button(s,text="Search",command=self.search_p).grid(row=0,column=1,padx=5)
+        tk.Entry(s,textvariable=self.filter,width=15).grid(row=0,column=2,padx=5)
+        tk.Button(s,text="Filter",command=self.filter_cat).grid(row=0,column=3,padx=5)
+        tk.Button(s,text="Show All",command=self.load).grid(row=0,column=4,padx=5)
+
+        # Stats
+        st=ttk.LabelFrame(r,text="Inventory Statistics"); st.pack(fill="x",padx=8,pady=5)
+        tk.Button(st,text="Low Stock Alert",command=self.low_stock).pack(side="left",padx=5)
+        tk.Button(st,text="Category Summary",command=self.cat_sum).pack(side="left",padx=5)
+        tk.Button(st,text="Inventory Value",command=self.inv_val).pack(side="left",padx=5)
+
+        # Records
+        c=("ID","Name","Category","Price","Stock")
+        self.tree=ttk.Treeview(r,columns=c,show="headings",height=12)
+        for col in c:self.tree.heading(col,text=col)
+        self.tree.pack(fill="both",expand=True,padx=8,pady=5)
+        self.tree.bind("<<TreeviewSelect>>",self.sel)
+        self.load()
+
+    # ---------- Funcs ----------
+    def load(self,rows=None):
+        self.tree.delete(*self.tree.get_children())
+        rows=rows or db("SELECT * FROM inv ORDER BY name",fetch=True)
+        if not rows:self.tree.insert("", "end", values=("","No products yet","","",""))
+        for r in rows:self.tree.insert("", "end", values=r)
+
+    def add(self):
+        if not self.id.get() or not self.name.get():return messagebox.showwarning("Warn","ID & Name needed")
+        try:
+            price_val = float(self.price.get() or 0)
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Price must be a number and Stock an integer")
+        try:
+            db("INSERT INTO inv VALUES (?,?,?,?,?)",(self.id.get(),self.name.get(),self.cat.get(),price_val,stock_val))
+        except sqlite3.IntegrityError:
+            return messagebox.showerror("Error","ID already exists")
+        self.clear();self.load()
+
+    def update(self):
+        if not self.id.get():return
+        try:
+            price_val = float(self.price.get() or 0)
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Price must be a number and Stock an integer")
+        db("UPDATE inv SET name=?,cat=?,price=?,stock=? WHERE id=?",
+           (self.name.get(),self.cat.get(),price_val,stock_val,self.id.get()))
+        self.clear();self.load()
+
+    def delete(self):
+        if not self.id.get():return
+        db("DELETE FROM inv WHERE id=?",(self.id.get(),))
+        self.clear();self.load()
+
+    def upd_stock(self):
+        if not self.id.get():return
+        try:
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Stock must be an integer")
+        db("UPDATE inv SET stock=? WHERE id=?",(stock_val,self.id.get()))
+        self.clear();self.load()
+
+    def clear(self):
+        for v in [self.id,self.name,self.cat,self.price,self.stock,self.search,self.filter]:v.set("")
+        self.tree.selection_remove(self.tree.selection())
+
+    def search_p(self):
+        t=f"%{self.search.get()}%";self.load(db("SELECT * FROM inv WHERE id LIKE ? OR name LIKE ?",(t,t),fetch=True))
+
+    def filter_cat(self):
+        c=self.filter.get();self.load(db("SELECT * FROM inv WHERE cat=?",(c,),fetch=True))
+
+    def low_stock(self):
+        self.load(db("SELECT * FROM inv WHERE stock<5",fetch=True))
+
+    def cat_sum(self):
+        rows=db("SELECT cat,COUNT(*) FROM inv GROUP BY cat",fetch=True)
+        messagebox.showinfo("Category Summary","\n".join(f"{c}: {n}" for c,n in rows) or "No data")
+
+    def inv_val(self):
+        val=db("SELECT SUM(price*stock) FROM inv",fetch=True)[0][0] or 0
+        messagebox.showinfo("Inventory Value",f"Total Value: ${val:.2f}")
+
+    def sel(self,e):
+        sel = self.tree.selection()
+        if not sel:return
+        v=self.tree.item(sel[0],"values")
+        if not v or not v[0]:return
+        self.id.set(v[0]);self.name.set(v[1]);self.cat.set(v[2]);self.price.set(v[3]);self.stock.set(v[4])
+
+# ---------- Run ----------
+if __name__=="__main__":
+    tk.Tk().geometry("850x550+200+100");IMS(tk._default_root);tk.mainloop()
+      </textarea>
+    </main>
+
+    <footer class="wrap">
+      <small>Open this page locally to view and copy your code.</small>
+    </footer>
+
+    <!-- Embedded code payloads (kept as JSON to avoid escaping issues) -->
+    <script type="application/json" id="code-inv">
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+
+# ---------- DB ----------
+def db_init():
+    with sqlite3.connect("inv.db") as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS inv(
+                        id TEXT PRIMARY KEY, 
+                        name TEXT, 
+                        cat TEXT, 
+                        price REAL, 
+                        stock INT)""")
+
+def db(q, p=(), fetch=False):
+    with sqlite3.connect("inv.db") as con:
+        cur = con.execute(q, p)
+        return cur.fetchall() if fetch else None
+
+# ---------- App ----------
+class IMS:
+    def __init__(self, r):
+        self.r=r; r.title("Inventory Management System"); db_init()
+        self.id,self.name,self.cat,self.price,self.stock,self.search,self.filter=[tk.StringVar() for _ in range(7)]
+
+        # Info
+        f=ttk.LabelFrame(r,text="Product Info"); f.pack(fill="x",padx=8,pady=5)
+        for i,(t,v,w) in enumerate([("ID",self.id,12),("Name",self.name,20),
+            ("Category",self.cat,12),("Price",self.price,10),("Stock",self.stock,10)]):
+            tk.Label(f,text=t+":").grid(row=i//2,column=(i%2)*2,sticky="e",padx=5,pady=3)
+            tk.Entry(f,textvariable=v,width=w).grid(row=i//2,column=(i%2)*2+1,sticky="w",padx=5,pady=3)
+
+        # Buttons
+        b=tk.Frame(r); b.pack(pady=4)
+        for t,c in [("Add Product",self.add),("Update Product",self.update),
+                    ("Delete Product",self.delete),("Update Stock",self.upd_stock),("Clear Fields",self.clear)]:
+            tk.Button(b,text=t,width=12,command=c).pack(side="left",padx=4)
+
+        # Search & Filter
+        s=ttk.LabelFrame(r,text="Search & Filter"); s.pack(fill="x",padx=8,pady=5)
+        tk.Entry(s,textvariable=self.search,width=25).grid(row=0,column=0,padx=5,pady=5)
+        tk.Button(s,text="Search",command=self.search_p).grid(row=0,column=1,padx=5)
+        tk.Entry(s,textvariable=self.filter,width=15).grid(row=0,column=2,padx=5)
+        tk.Button(s,text="Filter",command=self.filter_cat).grid(row=0,column=3,padx=5)
+        tk.Button(s,text="Show All",command=self.load).grid(row=0,column=4,padx=5)
+
+        # Stats
+        st=ttk.LabelFrame(r,text="Inventory Statistics"); st.pack(fill="x",padx=8,pady=5)
+        tk.Button(st,text="Low Stock Alert",command=self.low_stock).pack(side="left",padx=5)
+        tk.Button(st,text="Category Summary",command=self.cat_sum).pack(side="left",padx=5)
+        tk.Button(st,text="Inventory Value",command=self.inv_val).pack(side="left",padx=5)
+
+        # Records
+        c=("ID","Name","Category","Price","Stock")
+        self.tree=ttk.Treeview(r,columns=c,show="headings",height=12)
+        for col in c:self.tree.heading(col,text=col)
+        self.tree.pack(fill="both",expand=True,padx=8,pady=5)
+        self.tree.bind("<<TreeviewSelect>>",self.sel)
+        self.load()
+
+    # ---------- Funcs ----------
+    def load(self,rows=None):
+        self.tree.delete(*self.tree.get_children())
+        rows=rows or db("SELECT * FROM inv ORDER BY name",fetch=True)
+        if not rows:self.tree.insert("", "end", values=("","No products yet","","",""))
+        for r in rows:self.tree.insert("", "end", values=r)
+
+    def add(self):
+        if not self.id.get() or not self.name.get():return messagebox.showwarning("Warn","ID & Name needed")
+        try:
+            price_val = float(self.price.get() or 0)
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Price must be a number and Stock an integer")
+        try:
+            db("INSERT INTO inv VALUES (?,?,?,?,?)",(self.id.get(),self.name.get(),self.cat.get(),price_val,stock_val))
+        except sqlite3.IntegrityError:
+            return messagebox.showerror("Error","ID already exists")
+        self.clear();self.load()
+
+    def update(self):
+        if not self.id.get():return
+        try:
+            price_val = float(self.price.get() or 0)
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Price must be a number and Stock an integer")
+        db("UPDATE inv SET name=?,cat=?,price=?,stock=? WHERE id=\"?\"",
+           (self.name.get(),self.cat.get(),price_val,stock_val,self.id.get()))
+        self.clear();self.load()
+
+    def delete(self):
+        if not self.id.get():return
+        db("DELETE FROM inv WHERE id=?",(self.id.get(),))
+        self.clear();self.load()
+
+    def upd_stock(self):
+        if not self.id.get():return
+        try:
+            stock_val = int(self.stock.get() or 0)
+        except ValueError:
+            return messagebox.showwarning("Warn","Stock must be an integer")
+        db("UPDATE inv SET stock=? WHERE id=?",(stock_val,self.id.get()))
+        self.clear();self.load()
+
+    def clear(self):
+        for v in [self.id,self.name,self.cat,self.price,self.stock,self.search,self.filter]:v.set("")
+        self.tree.selection_remove(self.tree.selection())
+
+    def search_p(self):
+        t=f"%{self.search.get()}%";self.load(db("SELECT * FROM inv WHERE id LIKE ? OR name LIKE ?",(t,t),fetch=True))
+
+    def filter_cat(self):
+        c=self.filter.get();self.load(db("SELECT * FROM inv WHERE cat=?",(c,),fetch=True))
+
+    def low_stock(self):
+        self.load(db("SELECT * FROM inv WHERE stock<5",fetch=True))
+
+    def cat_sum(self):
+        rows=db("SELECT cat,COUNT(*) FROM inv GROUP BY cat",fetch=True)
+        messagebox.showinfo("Category Summary","\n".join(f"{c}: {n}" for c,n in rows) or "No data")
+
+    def inv_val(self):
+        val=db("SELECT SUM(price*stock) FROM inv",fetch=True)[0][0] or 0
+        messagebox.showinfo("Inventory Value",f"Total Value: ${{val:.2f}}")
+
+    def sel(self,e):
+        sel = self.tree.selection()
+        if not sel:return
+        v=self.tree.item(sel[0],"values")
+        if not v or not v[0]:return
+        self.id.set(v[0]);self.name.set(v[1]);self.cat.set(v[2]);self.price.set(v[3]);self.stock.set(v[4])
+
+# ---------- Run ----------
+if __name__=="__main__":
+    tk.Tk().geometry("850x550+200+100");IMS(tk._default_root);tk.mainloop()
+    </script>
+
+    <script type="application/json" id="code-emp">
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+
+# ---------- DB Setup ----------
+def db_init():
+    with sqlite3.connect("emp.db") as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS emp(
+                        id TEXT PRIMARY KEY, 
+                        name TEXT, 
+                        dept TEXT, 
+                        salary REAL, 
+                        email TEXT)""")
+
+def db_query(q, p=(), fetch=False):
+    with sqlite3.connect("emp.db") as con:
+        cur = con.execute(q, p)
+        return cur.fetchall() if fetch else None
+
+# ---------- Main App ----------
+class EMS:
+    def __init__(self, r):
+        self.r = r; r.title("Employee Management System"); db_init()
+
+        # Vars
+        self.id, self.name, self.dept, self.salary, self.email, self.search = \
+            [tk.StringVar() for _ in range(6)]
+
+        # Info frame
+        f = ttk.LabelFrame(r, text="Employee Info"); f.pack(fill="x", padx=8, pady=5)
+        for i, (txt, var, w) in enumerate([
+            ("ID", self.id, 12), ("Name", self.name, 25),
+            ("Dept", self.dept, 12), ("Salary", self.salary, 12), ("Email", self.email, 30)
+        ]):
+            tk.Label(f, text=txt+":").grid(row=i//2, column=(i%2)*2, sticky="e", padx=5, pady=3)
+            tk.Entry(f, textvariable=var, width=w).grid(row=i//2, column=(i%2)*2+1, sticky="w", padx=5, pady=3)
+
+        # Buttons
+        b = tk.Frame(r); b.pack(pady=4)
+        for t, cmd in [("Add", self.add), ("Update", self.update), 
+                       ("Delete", self.delete), ("Clear", self.clear)]:
+            tk.Button(b, text=t, width=12, command=cmd).pack(side="left", padx=5)
+
+        # Search
+        s = ttk.LabelFrame(r, text="Search"); s.pack(fill="x", padx=8, pady=5)
+        tk.Entry(s, textvariable=self.search, width=30).grid(row=0, column=0, padx=5, pady=5)
+        tk.Button(s, text="Search", command=self.search_emp).grid(row=0, column=1, padx=5)
+        tk.Button(s, text="Show All", command=self.load).grid(row=0, column=2, padx=5)
+
+        # Records table
+        c = ("ID", "Name", "Dept", "Salary", "Email")
+        self.tree = ttk.Treeview(r, columns=c, show="headings", height=12)
+        for col in c: self.tree.heading(col, text=col)
+        self.tree.pack(fill="both", expand=True, padx=8, pady=5)
+        self.tree.bind("<<TreeviewSelect>>", self.select)
+        self.load()
+
+    # ---------- Functions ----------
+    def load(self, rows=None):
+        self.tree.delete(*self.tree.get_children())
+        rows = rows or db_query("SELECT * FROM emp ORDER BY name", fetch=True)
+        if not rows: self.tree.insert("", "end", values=("","No employees yet","","",""))
+        for r in rows: self.tree.insert("", "end", values=r)
+
+    def add(self):
+        if not self.id.get() or not self.name.get(): return messagebox.showwarning("Warn","ID & Name required")
+        try:
+            db_query("INSERT INTO emp VALUES (?,?,?,?,?)", 
+                     (self.id.get(), self.name.get(), self.dept.get(), self.salary.get() or 0, self.email.get()))
+            self.clear(); self.load()
+        except: messagebox.showerror("Error","ID already exists")
+
+    def update(self):
+        if not self.id.get(): return
+        db_query("UPDATE emp SET name=?, dept=?, salary=?, email=? WHERE id=?",
+                 (self.name.get(), self.dept.get(), self.salary.get() or 0, self.email.get(), self.id.get()))
+        self.clear(); self.load()
+
+    def delete(self):
+        if not self.id.get(): return
+        db_query("DELETE FROM emp WHERE id=?", (self.id.get(),))
+        self.clear(); self.load()
+
+    def clear(self):
+        for v in [self.id, self.name, self.dept, self.salary, self.email, self.search]: v.set("")
+        self.tree.selection_remove(self.tree.selection())
+
+    def search_emp(self):
+        t = f"%{self.search.get()}%"
+        self.load(db_query("SELECT * FROM emp WHERE id LIKE ? OR name LIKE ?", (t,t), fetch=True))
+
+    def select(self, e):
+        vals = self.tree.item(self.tree.selection()[0],"values")
+        if not vals[0]: return
+        self.id.set(vals[0]); self.name.set(vals[1]); self.dept.set(vals[2]); self.salary.set(vals[3]); self.email.set(vals[4])
+
+# ---------- Run ----------
+if __name__ == "__main__":
+    tk.Tk().geometry("800x500+200+100"); EMS(tk._default_root); tk.mainloop()
+    </script>
+
+    <script>
+      const codeEl = document.getElementById('code');
+      const selectEl = document.getElementById('codeSelect');
+      const INVENTORY_CODE = document.getElementById('code-inv').textContent.trimStart();
+      const EMPLOYEE_CODE = document.getElementById('code-emp').textContent.trimStart();
+
+      const codeByKey = { inv: INVENTORY_CODE, emp: EMPLOYEE_CODE };
+      const filenameByKey = { inv: 'inventory_app.py', emp: 'employee_app.py' };
+
+      // Initialize textarea with current selection (default 'inv')
+      codeEl.value = codeByKey[selectEl.value] || INVENTORY_CODE;
+
+      selectEl.addEventListener('change', () => {
+        const key = selectEl.value;
+        codeEl.value = codeByKey[key] || '';
+      });
+      document.getElementById('copyBtn').addEventListener('click', async () => {
+        codeEl.select();
+        codeEl.setSelectionRange(0, codeEl.value.length);
+        try {
+          await navigator.clipboard.writeText(codeEl.value);
+          alert('Copied to clipboard.');
+        } catch (e) {
+          document.execCommand('copy');
+          alert('Copied to clipboard.');
+        }
+      });
+
+      document.getElementById('downloadBtn').addEventListener('click', () => {
+        const key = selectEl.value;
+        const blob = new Blob([codeEl.value], { type: 'text/x-python;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filenameByKey[key] || 'code.py';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+    </script>
+  </body>
+  </html>
+
+
